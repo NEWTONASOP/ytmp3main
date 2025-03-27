@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NewtaneMP3</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Custom Title Bar -->
+        <div class="title-bar">
+            <span class="title">NewtaneMP3</span>
+            <div class="window-controls">
+                <button class="btn minimize" onclick="electron.minimizeApp()">➖</button>
+                <button class="btn close" onclick="electron.closeApp()">✖</button>
+            </div>
+        </div>
+
+        <!-- Input Field -->
+        <input type="text" id="url" placeholder="Enter YouTube URL">
+
+        <!-- Download Button -->
+        <button id="download">Download MP3</button>
+
+        <!-- Status Message -->
+        <p id="status"></p>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>
