@@ -2,30 +2,40 @@ const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const express = require("express");
 const path = require("path");
 const { exec } = require("child_process");
+const cors = require("cors");
 
 let mainWindow;
 const isServerMode = process.env.RENDER || false; // Detect if running on Render
 
 if (isServerMode) {
     const serverApp = express();
+    serverApp.use(cors()); // Allow frontend to access backend
+    serverApp.use(express.json()); // Enable JSON body parsing
+    serverApp.use(express.static(__dirname)); // Serve index.html and assets
 
-    // Serve static files (index.html, CSS, JS) from root directory
-    serverApp.use(express.static(__dirname));
-
-    // Serve index.html when accessing "/"
     serverApp.get("/", (req, res) => {
         res.sendFile(path.join(__dirname, "index.html"));
     });
 
-    // API Route for downloading MP3
     serverApp.post("/download", async (req, res) => {
         const { url } = req.body;
-        if (!url) return res.status(400).send("No URL provided.");
+        if (!url) return res.status(400).json({ error: "No URL provided." });
 
-        const command = `yt-dlp -x --audio-format mp3 -o "downloads/%(title)s.%(ext)s" "${url}"`;
-        exec(command, (error) => {
-            if (error) return res.status(500).send("Download failed.");
-            res.send("Download started.");
+        const outputTemplate = "%(title)s.%(ext)s";
+        const command = `yt-dlp -x --audio-format mp3 -o "${outputTemplate}" "${url}"`;
+
+        exec(command, (error, stdout, stderr) => {
+            if (error) {
+                console.error(stderr);
+                return res.status(500).json({ error: "Download failed." });
+            }
+
+            // Extract file name from stdout
+            const match = stdout.match(/\[ExtractAudio\] Destination: (.+)/);
+            const filename = match ? match[1] : "output.mp3";
+            const fileUrl = `${req.protocol}://${req.get("host")}/${filename}`;
+
+            res.json({ message: "Download started", fileUrl });
         });
     });
 
@@ -59,7 +69,8 @@ if (isServerMode) {
 
             const command = `yt-dlp -x --audio-format mp3 -o "${filePath}" "${url}"`;
             exec(command, (error) => {
-                event.reply("download-status", error ? "Error" : "Success");
+                if (error) return event.reply("download-status", "Error");
+                event.reply("download-status", "Success");
             });
         });
     });
