@@ -1,43 +1,66 @@
+const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const express = require("express");
-const cors = require("cors");
-const { exec } = require("child_process");
 const path = require("path");
-const fs = require("fs");
+const { exec } = require("child_process");
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+let mainWindow;
+const isServerMode = process.env.RENDER || false; // Detect if running on Render
 
-const PORT = process.env.PORT || 3000; // Render will set PORT automatically
+if (isServerMode) {
+    const serverApp = express();
 
-app.post("/download", async (req, res) => {
-    const { url } = req.body;
+    // Serve static files (index.html, CSS, JS) from root directory
+    serverApp.use(express.static(__dirname));
 
-    if (!url) {
-        return res.status(400).json({ message: "URL is required" });
-    }
+    // Serve index.html when accessing "/"
+    serverApp.get("/", (req, res) => {
+        res.sendFile(path.join(__dirname, "index.html"));
+    });
 
-    // Get video title for correct filename
-    exec(`yt-dlp --print filename -o "%(title)s.%(ext)s" "${url}"`, (err, stdout) => {
-        if (err) {
-            return res.status(500).json({ message: "Error fetching filename" });
-        }
+    // API Route for downloading MP3
+    serverApp.post("/download", async (req, res) => {
+        const { url } = req.body;
+        if (!url) return res.status(400).send("No URL provided.");
 
-        const fileName = stdout.trim().replace(/[^a-zA-Z0-9.-]/g, "_") + ".mp3";
-        const outputPath = path.join(__dirname, "downloads", fileName);
-
-        // Ensure 'downloads' folder exists
-        if (!fs.existsSync("downloads")) fs.mkdirSync("downloads");
-
-        // Download the file
-        exec(`yt-dlp -x --audio-format mp3 -o "${outputPath}" "${url}"`, (err) => {
-            if (err) {
-                return res.status(500).json({ message: "Download failed" });
-            }
-
-            res.json({ message: "Download completed", fileName });
+        const command = `yt-dlp -x --audio-format mp3 -o "downloads/%(title)s.%(ext)s" "${url}"`;
+        exec(command, (error) => {
+            if (error) return res.status(500).send("Download failed.");
+            res.send("Download started.");
         });
     });
-});
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    const PORT = process.env.PORT || 3000;
+    serverApp.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+} else {
+    app.whenReady().then(() => {
+        mainWindow = new BrowserWindow({
+            width: 800,
+            height: 600,
+            frame: false,
+            webPreferences: {
+                preload: path.join(__dirname, "preload.js"),
+                nodeIntegration: false,
+                contextIsolation: true
+            }
+        });
+
+        mainWindow.loadFile("index.html");
+
+        ipcMain.on("close-app", () => mainWindow.close());
+        ipcMain.on("minimize-app", () => mainWindow.minimize());
+        ipcMain.on("download-mp3", async (event, url) => {
+            const { filePath } = await dialog.showSaveDialog({
+                title: "Save MP3",
+                defaultPath: "download.mp3",
+                filters: [{ name: "MP3 Files", extensions: ["mp3"] }]
+            });
+
+            if (!filePath) return event.reply("download-status", "Cancelled");
+
+            const command = `yt-dlp -x --audio-format mp3 -o "${filePath}" "${url}"`;
+            exec(command, (error) => {
+                event.reply("download-status", error ? "Error" : "Success");
+            });
+        });
+    });
+}
